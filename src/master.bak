@@ -1,0 +1,299 @@
+!  _________
+! |   FILE  |_______________________________________
+! |                 _________                       |
+! | master.f90     |  AUTHOR |_______________________________________
+! |   _________    |                                                 |
+! |  | RESUME  |___| Rubén Muñoz <rmunoz@cbm.uam.es> CBM-SO (CSIC)   |
+! |__|             |_________________________________________________|
+!    | 30-07-2006:                                              |            
+!    |                                                          | 
+!    |   Master solver in f90...                                | 
+!    |__________________________________________________________|
+
+        PROGRAM MASTER
+
+        IMPLICIT NONE
+    
+        INTEGER :: n,m,ssize,send,bend
+        INTEGER, DIMENSION(:,:), ALLOCATABLE :: initial,final
+        INTEGER, DIMENSION(:,:), ALLOCATABLE :: board
+        INTEGER, DIMENSION(:,:,:), ALLOCATABLE :: stack
+        INTEGER, DIMENSION(:,:,:), ALLOCATABLE :: black
+        INTEGER, DIMENSION(:), ALLOCATABLE :: family
+        LOGICAL :: childs
+    
+        READ (*,*) n, m 
+        WRITE(*,*) 'n=',n,'m=',m
+        
+        ssize=1000
+
+        ALLOCATE (initial(n,m))
+        ALLOCATE (final(n,m))
+        ALLOCATE (board(n,m))
+        ALLOCATE (stack(ssize,n,m))
+        ALLOCATE (black(ssize,n,m))
+
+        READ *, initial
+        initial=TRANSPOSE(initial)
+    
+        READ *, final
+        final=TRANSPOSE(final)
+
+        board=initial
+        send=0
+        bend=0
+        black=0
+        stack=0
+        childs=.FALSE.
+        
+        CALL PUSH(board,stack)        
+        DO WHILE(.TRUE.)
+            CALL POP(board,stack)
+!            WRITE(*,*) '............'
+!            WRITE(*,*) 'Board:'
+!            CALL PRINTRESULT (board)
+!            WRITE(*,*) '............'
+            IF (ALL (board == final)) THEN
+                WRITE(*,*) 'GOAL:'
+                CALL PRINTRESULT (board)
+                EXIT
+            END IF
+            CALL SEARCHDEPTH(board)
+!           In the path
+            IF (childs) THEN
+                WRITE(*,*) ''
+                CALL PRINTRESULT(board)
+                WRITE(*,*) ''
+            END IF
+            childs=.FALSE.
+        END DO
+    
+        CONTAINS
+    
+            SUBROUTINE SEARCHDEPTH (board)
+            
+                IMPLICIT NONE
+
+                INTEGER, DIMENSION(n,m), INTENT(INOUT) :: board
+                INTEGER, DIMENSION(n,m) :: new
+                LOGICAL, DIMENSION(n,m) :: mover,movel,moveu,moved 
+                LOGICAL, DIMENSION(n,m) :: mask
+                INTEGER :: i,j,p,piece
+                INTEGER, DIMENSION(ssize) :: pieces
+                LOGICAL :: possr, possl, possu, possd
+                REAL :: ran
+
+                IF (ALL (board == final)) THEN
+                    RETURN 
+                END IF
+
+!               Find the different pieces
+                pieces=0
+                pieces=PACK(board,MASK=(board /= 0))
+
+
+                DO i=1,ssize
+                    IF (ANY(pieces(1:i)==pieces(i+1))) THEN
+                        pieces(i+1)=0
+                    END IF
+                END DO
+            
+                DO p=1,ssize
+                    piece=pieces(p)
+
+                    IF (piece == 0) CYCLE
+
+!                   Find the map of the piece and the mask
+                
+                    mask = board == 0 .OR. board == piece
+                    mover = .FALSE.
+                    movel = .FALSE.
+                    moveu = .FALSE.
+                    moved = .FALSE.
+                    possr = .TRUE.
+                    possl = .TRUE.
+                    possu = .TRUE.
+                    possd = .TRUE.
+                    
+!                   Transform the map of the piece in the 4 possible maps
+                    DO i = 1,n
+                        DO j = 1,m
+                            IF (board(i,j)==piece) THEN
+                                IF (i < n .AND. mask(i+1,j)) THEN
+                                    moved(i+1,j) = .TRUE.
+                                ELSE
+                                    possd = .FALSE.
+                                END IF
+                                IF (i > 1 .AND. mask(i-1,j)) THEN
+                                    moveu(i-1,j) = .TRUE.
+                                ELSE
+                                    possu = .FALSE.
+                                END IF
+                                IF (j < m .AND. mask(i,j+1)) THEN
+                                    mover(i,j+1) = .TRUE. 
+                                ELSE
+                                    possr = .FALSE.
+                                END IF
+                                IF (j > 1 .AND. mask(i,j-1)) THEN
+                                    movel(i,j-1) = .TRUE.
+                                ELSE
+                                    possl = .FALSE.
+                                END IF
+                            END IF
+                        END DO
+                    END DO
+            
+!                   Take the new place 
+                    IF (possl) THEN
+                        new = board
+                        WHERE (new==piece) new=0
+                        WHERE (movel) new = piece
+                        IF (ANY(new /= initial)) THEN
+!                            WRITE(*,*) 'Left:'
+!                            CALL PRINTRESULT (new)
+                            CALL PUSH(new,stack)
+                        END IF
+                    END IF
+
+                    IF (possr) THEN
+                        new = board
+                        WHERE (new==piece) new=0
+                        WHERE (mover) new = piece
+                        IF (ANY(new /= initial)) THEN
+!                            WRITE(*,*) 'Right:'
+!                            CALL PRINTRESULT (new)
+                            CALL PUSH(new,stack)
+                        END IF
+                    END IF
+
+                    IF (possu) THEN
+                        new = board
+                        WHERE (new==piece) new=0
+                        WHERE (moveu) new = piece
+                        IF (ANY(new /= initial)) THEN
+!                            WRITE(*,*) 'Up:'
+!                            CALL PRINTRESULT (new)
+                            CALL PUSH(new,stack)
+                        END IF
+                    END IF
+
+                    IF (possd) THEN
+                        new = board
+                        WHERE (new==piece) new=0
+                        WHERE (moved) new = piece
+                        IF (ANY(new /= initial)) THEN
+!                            WRITE(*,*) 'Down:'
+!                            CALL PRINTRESULT (new) 
+                            CALL PUSH(new,stack)
+                        END IF
+                    END IF
+                END DO
+
+            END SUBROUTINE
+            
+            SUBROUTINE push(item,stack)
+                INTEGER, DIMENSION(n,m), INTENT(IN) :: item
+                INTEGER, DIMENSION(:,:,:) :: stack
+                INTEGER :: i
+                DO i=1,bend
+                    IF (ALL(item==black(i,:,:))) THEN
+!                        WRITE(*,*) 'Black listed:'
+!                        CALL PRINTRESULT(item)
+                        RETURN
+                    END IF
+                END DO
+
+                DO i=1,ssize
+                    IF (ALL(item==stack(i,:,:))) THEN
+!                        WRITE(*,*) 'Repeated:'
+!                        CALL PRINTRESULT(item)
+                        RETURN
+                    END IF
+                END DO
+
+
+                IF (send < ssize) THEN
+!                    WRITE(*,*) 'Push:'
+!                    CALL PRINTRESULT(item)
+                    childs=.TRUE.
+                    send = send + 1
+                    stack(send,:,:)=item
+                ELSE
+                    WRITE(*,*) 'Error: Stack full!'
+                    STOP
+                ENDIF
+
+            END SUBROUTINE 
+    
+            SUBROUTINE pop(item,stack)
+                INTEGER, DIMENSION(n,m), INTENT(OUT) :: item
+                INTEGER, DIMENSION(:,:,:) :: stack
+                
+                item=stack(send,:,:)
+
+                IF (send > 0) THEN
+                    send = send - 1
+!                    WRITE(*,*) 'Pop:'
+!                    CALL PRINTRESULT(item)
+                ELSE 
+                    WRITE(*,*) 'Error: Stack empty!'
+                    STOP
+                END IF
+
+                IF (bend < ssize) THEN
+                    bend = bend + 1
+                    black(bend,:,:)=item
+                END IF
+
+            END SUBROUTINE 
+!            SUBROUTINE push(item,stack)
+!                INTEGER, DIMENSION(n,m), INTENT(IN) :: item
+!                INTEGER, DIMENSION(:,:,:) :: stack
+!                INTEGER :: i
+!                
+!                DO i=1,ssize
+!                    IF (ALL(item==stack(i,:,:))) THEN
+!                        RETURN
+!                    END IF
+!                END DO
+!
+!                IF (send < ssize) THEN
+!                    send = send + 1
+!                ELSE
+!                    send=1
+!                ENDIF
+!
+!                stack(send,:,:)=item
+!                family(send)=findex
+!
+!            END SUBROUTINE 
+!    
+!            SUBROUTINE pop(item,stack)
+!                INTEGER, DIMENSION(n,m), INTENT(OUT) :: item
+!                INTEGER, DIMENSION(:,:,:) :: stack
+!                
+!                findex=sstart
+!                item=stack(sstart,:,:)
+!
+!                IF (sstart < ssize) THEN
+!                    sstart = sstart + 1
+!                ELSE
+!                    sstart=1
+!                END IF
+!
+!            END SUBROUTINE 
+
+            SUBROUTINE PRINTRESULT(board)
+
+                IMPLICIT NONE
+    
+                INTEGER, DIMENSION(n,m), INTENT(IN) :: board
+                INTEGER :: i,j
+    
+                DO i=1,n
+                    WRITE(*,*) board(i,:)
+                END DO
+            END SUBROUTINE
+
+       END PROGRAM     
+
